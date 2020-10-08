@@ -207,6 +207,10 @@ function fromConsole(SymfonyStyle $console, ValidatorInterface $validator): arra
           $console->warning([
               'Failed to retrieve download information for:',
               $url,
+              'I\'ve tried the following URL for information:',
+              $dlUrl,
+              'The error message was:',
+              $response->getInfo(),
               'Skipping...',
           ]);
           continue;
@@ -221,6 +225,8 @@ function fromConsole(SymfonyStyle $console, ValidatorInterface $validator): arra
           $console->warning([
               'Failed to resolve download information for:',
               $url,
+              'The error message was:',
+              $e->getMessage(),
               'Skipping...',
           ]);
           continue;
