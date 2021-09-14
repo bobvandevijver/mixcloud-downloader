@@ -204,38 +204,112 @@ function fromConsole(SymfonyStyle $console, ValidatorInterface $validator): arra
       foreach ($toResolve as $url) {
         $resolveProgress->setProgress($idx++);
 
-        // Retrieve download information from dlmixcloud.com
-        $dlUrl    = str_replace('www.mixcloud.com', 'www.dlmixcloud.com', $url);
-        $response = $http->request('GET', $dlUrl);
-        if ($response->getStatusCode() !== 200) {
-          $console->warning([
-              'Failed to retrieve download information for:',
-              $url,
-              'I\'ve tried the following URL for information:',
-              $dlUrl,
-              'The error message was:',
-              $response->getInfo(),
-              'Skipping...',
+        $tries   = 0;
+        $info    = NULL;
+        $warning = NULL;
+        while ($tries < 5) {
+          sleep($tries * 2);
+          $tries++;
+          $info = NULL;
+
+          // Retrieve download information from dlmixcloud.com
+          $dlUrl    = str_replace('www.mixcloud.com', 'mixes.cloud', $url);
+          $response = $http->request('GET', $dlUrl);
+          if ($response->getStatusCode() !== 200) {
+            $warning = [
+                'Failed to retrieve download information for:',
+                $url,
+                'I\'ve tried the following URL for information:',
+                $dlUrl,
+                'The error message was:',
+                $response->getInfo(),
+                'Skipping...',
+            ];
+            continue;
+          }
+
+          // Resolve download method 2
+          try {
+            $crawler = new Crawler($response->getContent(), $dlUrl, 'https://mixes.cloud');
+
+            foreach ($crawler->filter('script') as $scriptNode) {
+              /** @var DOMElement $scriptNode */
+              $script = $scriptNode->nodeValue;
+              preg_match_all("/title: '(.+)',/", $script, $matches);
+              $title = $matches[1][0] ?? NULL;
+
+              preg_match_all("/url: '(.+)',/", $script, $matches);
+              $m4a = $matches[1][0] ?? NULL;
+
+              if ($title && $m4a) {
+                $info = new DownloadInfo($url, $title, $m4a);
+                break 2;
+              }
+            }
+
+            $form    = $crawler->filter('.container form#search')->form();
+            $postUrl = $form->getUri();
+            $data    = $form->getValues();
+          } catch (Throwable $e) {
+            $warning = [
+                'Failed to resolve download information for:',
+                $url,
+                'The error message was:',
+                $e->getMessage(),
+                'Skipping...',
+            ];
+            continue;
+          }
+
+          sleep($tries * 2);
+
+          // Retrieve the actual information
+          $response = $http->request('POST', $postUrl, [
+              'body' => $data,
           ]);
-          continue;
+          if ($response->getStatusCode() !== 200) {
+            $warning = [
+                'Failed to retrieve download information for:',
+                $url,
+                'I\'ve tried the following URL for information:',
+                $dlUrl,
+                'The error message was:',
+                $response->getInfo(),
+                'Skipping...',
+            ];
+            continue;
+          }
+
+          // Resolve download
+          try {
+            $crawler = new Crawler($response->getContent(), $postUrl, 'https://mixes.cloud');
+            $title   = $crawler->filter('h1')->first()->text();
+            $m4a     = $crawler->filter('#download_button')->first()->link()->getUri();
+
+            if (!$title || !$m4a) {
+              throw new Exception("Failed to resolve required information");
+            }
+          } catch (Throwable $e) {
+            $warning = [
+                'Failed to resolve download information for:',
+                $url,
+                'The error message was:',
+                $e->getMessage(),
+                'Skipping...',
+            ];
+            continue;
+          }
+
+          $info = new DownloadInfo($url, $title, $m4a);
         }
 
-        // Resolve download
-        try {
-          $crawler = new Crawler($response->getContent());
-          $title   = $crawler->filter('h1')->first()->text();
-          $m4a     = $crawler->filter('#download_button')->first()->link()->getUri();
-        } catch (Throwable $e) {
-          $console->warning([
-              'Failed to resolve download information for:',
-              $url,
-              'The error message was:',
-              $e->getMessage(),
-              'Skipping...',
-          ]);
+        if (!$info) {
+          if ($warning) {
+            $console->warning($warning);
+          }
+
           continue;
         }
-        $info = new DownloadInfo($url, $title, $m4a);
 
         // Start the download
         $resolveTextSection->writeln(sprintf('Starting download for "%s"', $info->getTitle()));
