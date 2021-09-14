@@ -107,6 +107,10 @@ function fromApi(SymfonyStyle $console, ValidatorInterface $validator): array
   $count = count($data);
 
   for ($i = 0; $i < $count; $i++) {
+    if ($propAccessor->getValue($data[$i], '[type]') !== 'upload') {
+      continue;
+    }
+
     $episode = $propAccessor->getValue($data[$i], '[cloudcasts][0]');
     $name    = $propAccessor->getValue($episode, '[name]');
     $url     = $propAccessor->getValue($episode, '[url]');
